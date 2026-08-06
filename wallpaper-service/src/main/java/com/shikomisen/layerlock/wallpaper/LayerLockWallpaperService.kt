@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.shikomisen.layerlock.canvas.ClockFormatter
 import com.shikomisen.layerlock.canvas.SceneAssets
 import com.shikomisen.layerlock.canvas.SceneCanvasRenderer
+import com.shikomisen.layerlock.canvas.VideoPlayers
 import com.shikomisen.layerlock.canvas.WidgetDataSource
 import com.shikomisen.layerlock.canvas.WidgetSnapshot
 import com.shikomisen.layerlock.data.AppSettings
@@ -125,6 +126,13 @@ class LayerLockWallpaperService : WallpaperService() {
             if (backgroundChanged || newSettings.staticMode) {
                 teardownVideo()
             }
+            if (backgroundChanged) {
+                // A different background earns a fresh GL attempt. Latching [glUnavailable] exists to
+                // stop a broken GL stack being retried every frame, not to condemn the rest of the
+                // session over one failure — which is how a transient failure turned into "video
+                // never works again until the wallpaper is re-applied".
+                glUnavailable = false
+            }
             setUpSurfaceIfNeeded()
             requestDraw()
         }
@@ -216,7 +224,7 @@ class LayerLockWallpaperService : WallpaperService() {
             texture.setOnFrameAvailableListener { handler.post { drawFrame() } }
 
             val source = scene?.background?.sourceUri ?: return
-            player = ExoPlayer.Builder(this@LayerLockWallpaperService).build().apply {
+            player = VideoPlayers.build(this@LayerLockWallpaperService).apply {
                 setMediaItem(MediaItem.fromUri(source))
                 repeatMode = if (scene?.background?.loop != false) {
                     Player.REPEAT_MODE_ONE

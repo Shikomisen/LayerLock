@@ -59,8 +59,13 @@ fun SceneSurface(
     timeMillis: Long = rememberSceneTime(scene).value,
 ) {
     val renderer = remember { SceneCanvasRenderer() }
-    val bands = remember(scene) { RenderBand.of(scene) }
-    val videoLayerIds = remember(bands) { RenderBand.videoLayerIds(bands) }
+    // A paused host draws poster frames instead of holding live players — see [RenderBand.posterOnly].
+    val bands = remember(scene, playVideo) {
+        if (playVideo) RenderBand.of(scene) else RenderBand.posterOnly(scene)
+    }
+    val videoLayerIds = remember(bands, playVideo) {
+        if (playVideo) RenderBand.videoLayerIds(bands) else emptySet()
+    }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
 
     DisposableEffect(assets, scene) {
@@ -134,7 +139,7 @@ private fun BoxScope.VideoBandSurface(
     val density = LocalDensity.current
 
     val player = remember(band.sourceUri) {
-        ExoPlayer.Builder(context).build().apply {
+        VideoPlayers.build(context).apply {
             setMediaItem(MediaItem.fromUri(band.sourceUri))
             repeatMode = if (band.loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             volume = if (band.muted) 0f else 1f

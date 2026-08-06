@@ -336,7 +336,12 @@ internal class GlWallpaperRenderer(
             )
             if (eglSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, eglSurface)
             if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context)
-            EGL14.eglTerminate(display)
+            // Deliberately no eglTerminate: EGL_DEFAULT_DISPLAY is a process-wide handle, so
+            // terminating it does not just tear down this renderer — it invalidates every other EGL
+            // context in the process. A wallpaper has at least two engines alive (the real surface
+            // and the picker's preview), and HWUI draws the app's own UI on that display too, so one
+            // engine tearing down would break the other's GL for good and destabilise the UI. The
+            // surface and context destroyed above are the resources this class actually owns.
         }
         display = EGL14.EGL_NO_DISPLAY
         context = EGL14.EGL_NO_CONTEXT

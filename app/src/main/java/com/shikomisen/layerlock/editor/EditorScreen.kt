@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -65,11 +66,25 @@ fun EditorScreen(
     onBack: () -> Unit,
     onShowPaywall: (ProFeature) -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: EditorViewModel = viewModel(factory = EditorViewModel.factory(sceneId)),
+    // Keyed by scene. Without the key, `viewModel()` stores this against the Activity under a key
+    // derived from the class name alone, so opening a second scene finds the first scene's instance
+    // already there and never calls the factory — the editor shows the wrong scene until the process
+    // restarts. There is no NavHost here to scope it for us (see Destination in LayerLockApp).
+    viewModel: EditorViewModel = viewModel(
+        key = sceneId,
+        factory = EditorViewModel.factory(sceneId),
+    ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHost = remember { SnackbarHostState() }
+
+    // These ViewModels live as long as the Activity — one per scene visited — so the decoded bitmaps
+    // are freed on the way out rather than accumulating across a browsing session. SceneSurface
+    // re-prepares them if this scene is opened again.
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.assets.release() }
+    }
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddSheet by remember { mutableStateOf(false) }

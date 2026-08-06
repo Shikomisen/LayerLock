@@ -84,6 +84,21 @@ sealed interface RenderBand {
             return bands
         }
 
+        /**
+         * A single canvas band covering the whole scene, for hosts that are not playing video.
+         *
+         * The canvas renderer already draws video layers and video backgrounds from their decoded
+         * poster frames, so a paused host needs no video surface at all. That matters because an
+         * ExoPlayer holds decoder buffers from the moment it is prepared, playing or not — and the
+         * scene library builds one host per row.
+         */
+        fun posterOnly(scene: Scene): List<RenderBand> = listOf(
+            CanvasBand(
+                layerIds = scene.drawOrder.map { it.id }.toSet(),
+                drawsBackground = true,
+            ),
+        )
+
         /** Ids of every layer a host draws with a live video surface rather than the canvas. */
         fun videoLayerIds(bands: List<RenderBand>): Set<String> = bands
             .filterIsInstance<VideoBand>()
