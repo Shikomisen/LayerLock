@@ -47,9 +47,16 @@ internal class GlWallpaperRenderer(
 
     private val stMatrix = FloatArray(16)
 
-    /** Texture coordinates, rewritten per frame to letterbox-free "cover" the video. */
+    /**
+     * Texture coordinates, rewritten per frame to letterbox-free "cover" the video.
+     *
+     * These use the GL convention — v = 0 at the *bottom* — unlike [overlayTexCoords]. That
+     * difference is load-bearing: a `SurfaceTexture`'s transform matrix already carries the flip from
+     * the video's top-down frame layout, and the shader applies it (`uSTMatrix * aTexCoord`). Handing
+     * it coordinates that were pre-flipped for a bitmap flips twice and renders the video upside down.
+     */
     private val videoTexCoords = floatBuffer(
-        floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f),
+        floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f),
     )
 
     private val quadVertices = floatBuffer(
@@ -203,12 +210,13 @@ internal class GlWallpaperRenderer(
 
         val left = cropX
         val right = 1f - cropX
-        val top = cropY
-        val bottom = 1f - cropY
+        // v ascends with the quad here (GL convention) — see [videoTexCoords].
+        val vMin = cropY
+        val vMax = 1f - cropY
 
         videoTexCoords.clear()
         videoTexCoords.put(
-            floatArrayOf(left, bottom, right, bottom, left, top, right, top),
+            floatArrayOf(left, vMin, right, vMin, left, vMax, right, vMax),
         )
         videoTexCoords.position(0)
     }

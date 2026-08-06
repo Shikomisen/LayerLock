@@ -13,6 +13,11 @@ android {
         minSdk = 26
     }
 
+    buildFeatures {
+        // EntitlementRepository gates its debug-only Pro override on BuildConfig.DEBUG.
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

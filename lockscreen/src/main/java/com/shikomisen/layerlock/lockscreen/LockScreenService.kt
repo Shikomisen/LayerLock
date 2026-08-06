@@ -10,7 +10,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 
 /**
  * Keeps the custom lock screen ready to show.
@@ -37,11 +39,14 @@ import android.os.IBinder
  */
 class LockScreenService : Service() {
 
+    private val handler = Handler(Looper.getMainLooper())
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_SCREEN_ON -> showLockScene()
-                Intent.ACTION_USER_PRESENT -> Unit // Already unlocked; nothing to show.
+                // Already unlocked: stop any retry still waiting for a keyguard that will not come.
+                Intent.ACTION_USER_PRESENT -> handler.removeCallbacksAndMessages(null)
             }
         }
     }
@@ -63,16 +68,29 @@ class LockScreenService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
         runCatching { unregisterReceiver(screenReceiver) }
         super.onDestroy()
     }
 
-    private fun showLockScene() {
+    /**
+     * Shows the lock scene once the keyguard has actually come up.
+     *
+     * `ACTION_SCREEN_ON` fires *before* the keyguard is necessarily up, so a single
+     * [KeyguardManager.isKeyguardLocked] check races it and loses often enough to look random — the
+     * scene appears on some wakes and not others. Re-checking for a short window converts that race
+     * into a wait. If the keyguard never appears (the device was unlocked, or the user unlocked
+     * within the window) nothing is shown, which is the correct outcome.
+     */
+    private fun showLockScene(attempt: Int = 0) {
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-        // If the device is not actually locked, there is nothing to draw in front of.
-        if (!keyguardManager.isKeyguardLocked) return
-
-        runCatching { startActivity(LockScreenActivity.intent(this)) }
+        if (keyguardManager.isKeyguardLocked) {
+            runCatching { startActivity(LockScreenActivity.intent(this)) }
+            return
+        }
+        if (attempt < KEYGUARD_ATTEMPTS) {
+            handler.postDelayed({ showLockScene(attempt + 1) }, KEYGUARD_RETRY_MS)
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -100,6 +118,10 @@ class LockScreenService : Service() {
     companion object {
         private const val CHANNEL_ID = "layerlock_lockscreen"
         private const val NOTIFICATION_ID = 4201
+
+        /** ~1.5s total. Long enough for a slow keyguard, short enough not to flash in late. */
+        private const val KEYGUARD_ATTEMPTS = 10
+        private const val KEYGUARD_RETRY_MS = 150L
 
         fun start(context: Context) {
             val intent = Intent(context, LockScreenService::class.java)

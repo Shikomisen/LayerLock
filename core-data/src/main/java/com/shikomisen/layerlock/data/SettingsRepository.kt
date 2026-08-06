@@ -35,4 +35,7 @@ class SettingsRepository(private val store: DataStore<AppSettings>) {
 
     internal suspend fun cacheProEntitlement(entitled: Boolean) =
         update { it.copy(cachedProEntitlement = entitled) }
+
+    internal suspend fun setDebugForceProEntitlement(enabled: Boolean) =
+        update { it.copy(debugForceProEntitlement = enabled) }
 }

@@ -34,6 +34,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // SettingsScreen shows the Pro override switch on debug builds only.
+        buildConfig = true
     }
 }
 

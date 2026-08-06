@@ -22,4 +22,11 @@ data class AppSettings(
     val showLayerBounds: Boolean = true,
     /** Local cache of the Play Billing entitlement — never the source of truth. See [ProStatus]. */
     val cachedProEntitlement: Boolean = false,
+    /**
+     * Debug builds only: unlock Pro without a Play purchase, so the gated features can be exercised
+     * without a Play Console product or a test account. Read only behind `BuildConfig.DEBUG` in
+     * `EntitlementRepository`, and deliberately never written to [cachedProEntitlement] — a release
+     * build that somehow inherited this datastore file still ignores it.
+     */
+    val debugForceProEntitlement: Boolean = false,
 )

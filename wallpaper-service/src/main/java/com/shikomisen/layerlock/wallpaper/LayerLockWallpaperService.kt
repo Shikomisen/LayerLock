@@ -9,6 +9,7 @@ import android.graphics.Canvas
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
+import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.media3.common.MediaItem
@@ -69,6 +70,17 @@ class LayerLockWallpaperService : WallpaperService() {
         private var surfaceWidth = 0
         private var surfaceHeight = 0
 
+        /**
+         * Whether the scene flow has produced a value yet (`null` counts).
+         *
+         * Nothing may be drawn before it has. `lockCanvas` connects the surface's BufferQueue to the
+         * CPU producer, and `eglCreateWindowSurface` on an already-connected surface fails — which
+         * latches [glUnavailable] for the rest of the session and silently downgrades a video
+         * wallpaper to its poster frame. The scene arrives asynchronously, so drawing a placeholder
+         * first is exactly how a video scene loses GL before it ever gets to ask for it.
+         */
+        private var sceneLoaded = false
+
         private var gl: GlWallpaperRenderer? = null
         private var glUnavailable = false
         private var player: ExoPlayer? = null
@@ -100,6 +112,7 @@ class LayerLockWallpaperService : WallpaperService() {
 
         private fun onSceneChanged(newScene: Scene?, newSettings: AppSettings) {
             val previous = scene
+            sceneLoaded = true
             scene = newScene
             settings = newSettings
             widgets = widgetDataSource.current()
@@ -142,6 +155,9 @@ class LayerLockWallpaperService : WallpaperService() {
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
             handler.removeCallbacks(drawRunnable)
             teardownVideo()
+            // A fresh surface deserves a fresh attempt: the usual reason GL failed is a property of
+            // the surface we are now discarding, not of the device.
+            glUnavailable = false
             super.onSurfaceDestroyed(holder)
         }
 
@@ -166,10 +182,23 @@ class LayerLockWallpaperService : WallpaperService() {
 
         private fun setUpSurfaceIfNeeded() {
             if (!usesVideoBackground()) {
+                val current = scene
+                // Why a video scene fell back to the static canvas is otherwise invisible from
+                // outside the process, and it has several independent causes.
+                Log.i(
+                    TAG,
+                    "No video path: staticMode=${settings.staticMode} " +
+                        "type=${current?.background?.type} " +
+                        "hasUri=${!current?.background?.sourceUri.isNullOrBlank()} " +
+                        "glUnavailable=$glUnavailable",
+                )
                 teardownVideo()
                 return
             }
-            if (gl?.isReady == true || surfaceWidth <= 0 || surfaceHeight <= 0) return
+            if (gl?.isReady == true || surfaceWidth <= 0 || surfaceHeight <= 0) {
+                Log.i(TAG, "Video setup deferred: ready=${gl?.isReady} size=${surfaceWidth}x$surfaceHeight")
+                return
+            }
 
             val renderer = GlWallpaperRenderer(surfaceHolder.surface, surfaceWidth, surfaceHeight)
             if (!renderer.initialise()) {
@@ -180,6 +209,7 @@ class LayerLockWallpaperService : WallpaperService() {
                 return
             }
             gl = renderer
+            Log.i(TAG, "GL video path active at ${surfaceWidth}x$surfaceHeight")
 
             val texture = renderer.surfaceTexture ?: return
             texture.setDefaultBufferSize(surfaceWidth, surfaceHeight)
@@ -226,6 +256,8 @@ class LayerLockWallpaperService : WallpaperService() {
 
         private fun drawFrame() {
             if (!isVisible || surfaceWidth <= 0 || surfaceHeight <= 0) return
+            // See [sceneLoaded]: a canvas draw here would cost a video scene its GL surface.
+            if (!sceneLoaded) return
             val current = scene ?: placeholderScene()
 
             if (usesVideoBackground() && gl?.isReady == true) {
@@ -357,6 +389,7 @@ class LayerLockWallpaperService : WallpaperService() {
 
     companion object {
 
+        private const val TAG = "LayerLockWallpaper"
         private const val MIN_FRAME_DELAY_MS = 16L
 
         /**
@@ -370,5 +403,25 @@ class LayerLockWallpaperService : WallpaperService() {
                 WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
                 ComponentName(context, LayerLockWallpaperService::class.java),
             )
+
+        /**
+         * Whether this app is the live wallpaper right now.
+         *
+         * Read from the system rather than cached in settings, deliberately: the user can change
+         * their wallpaper from anywhere in the OS, and a stored flag would go stale and start lying
+         * about it. `wallpaperInfo` is null whenever a static image wallpaper is set.
+         */
+        fun isActiveWallpaper(context: Context): Boolean =
+            WallpaperManager.getInstance(context).wallpaperInfo?.packageName == context.packageName
+
+        /**
+         * Removes this wallpaper, restoring the system default.
+         *
+         * There is no API to hand the wallpaper back to whatever was set before ours — the platform
+         * does not keep that history — so "off" means the device default.
+         */
+        fun clearWallpaper(context: Context): Result<Unit> = runCatching {
+            WallpaperManager.getInstance(context).clear()
+        }
     }
 }

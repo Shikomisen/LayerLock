@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +35,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shikomisen.layerlock.BuildConfig
 import com.shikomisen.layerlock.data.AppSettings
 import com.shikomisen.layerlock.data.LayerLockGraph
 import com.shikomisen.layerlock.lockscreen.LockScreenActivity
@@ -66,6 +71,23 @@ fun SettingsScreen(
 
     var showNotificationRationale by remember { mutableStateOf(false) }
 
+    // Re-read on every resume rather than held as a preference: the user can change their wallpaper
+    // anywhere in the OS — including in the system picker this screen launches — and a value
+    // captured once would sit there claiming to be on after they turned it off elsewhere.
+    var isWallpaperActive by remember {
+        mutableStateOf(LayerLockWallpaperService.isActiveWallpaper(context))
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isWallpaperActive = LayerLockWallpaperService.isActiveWallpaper(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -87,16 +109,31 @@ fun SettingsScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            SettingsSection("Apply") {
-                AssistChip(
-                    onClick = {
-                        runCatching {
-                            context.startActivity(
-                                LayerLockWallpaperService.changeLiveWallpaperIntent(context),
-                            )
+            SettingsSection("Wallpaper") {
+                SettingToggle(
+                    title = "Set LayerLock as wallpaper",
+                    description = if (isWallpaperActive) {
+                        "Currently active on this device. Turning this off restores the system " +
+                            "default wallpaper. Choose which scene goes where with the Lock and " +
+                            "Home buttons on each scene."
+                    } else {
+                        "Applies LayerLock as your live wallpaper. Android asks you to confirm in " +
+                            "its own picker — this app never changes your wallpaper on its own."
+                    },
+                    checked = isWallpaperActive,
+                    onChange = { enable ->
+                        if (enable) {
+                            runCatching {
+                                context.startActivity(
+                                    LayerLockWallpaperService.changeLiveWallpaperIntent(context),
+                                )
+                            }
+                            // State is re-read on resume; the picker decides the real outcome.
+                        } else {
+                            LayerLockWallpaperService.clearWallpaper(context)
+                            isWallpaperActive = LayerLockWallpaperService.isActiveWallpaper(context)
                         }
                     },
-                    label = { Text("Open live wallpaper picker") },
                 )
                 AssistChip(
                     onClick = { context.startActivity(LockScreenActivity.intent(context)) },
@@ -186,6 +223,19 @@ fun SettingsScreen(
                 )
                 if (!status.isPro) {
                     AssistChip(onClick = onShowPaywall, label = { Text("See what Pro adds") })
+                }
+            }
+
+            if (BuildConfig.DEBUG) {
+                SettingsSection("Debug") {
+                    SettingToggle(
+                        title = "Force Pro unlock",
+                        description = "Unlock every Pro feature without a Play purchase, so the " +
+                            "gated paths can be exercised locally. Debug builds only — this " +
+                            "section is not compiled into release.",
+                        checked = settings.debugForceProEntitlement,
+                        onChange = { scope.launch { entitlements.setDebugProOverride(it) } },
+                    )
                 }
             }
 

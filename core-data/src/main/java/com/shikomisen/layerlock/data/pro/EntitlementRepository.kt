@@ -1,6 +1,7 @@
 package com.shikomisen.layerlock.data.pro
 
 import com.android.billingclient.api.Purchase
+import com.shikomisen.layerlock.data.BuildConfig
 import com.shikomisen.layerlock.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +38,31 @@ class EntitlementRepository(
         }
     }
 
+    /**
+     * Debug builds only: unlock Pro without going through Play at all.
+     *
+     * Play has no zero-price in-app product, and its test-purchase paths need the app uploaded to a
+     * track, so exercising the gated features during development otherwise means either a real
+     * charge or a Play Console round-trip. This is the local shortcut. It is a no-op in release, and
+     * the resulting status is reported as [ProStatus.EntitledUnverified] rather than
+     * [ProStatus.Entitled] so nothing in the UI can mistake it for a verified purchase.
+     */
+    suspend fun setDebugProOverride(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
+        settings.setDebugForceProEntitlement(enabled)
+        refresh()
+    }
+
     suspend fun refresh(): ProStatus = refreshMutex.withLock {
+        if (BuildConfig.DEBUG && settings.snapshot().debugForceProEntitlement) {
+            // Deliberately not written through to cachedProEntitlement: the cache is what keeps a
+            // real purchase alive offline, and poisoning it here would leave the app "Pro" after the
+            // override is switched back off.
+            val status = ProStatus.EntitledUnverified(DEBUG_OVERRIDE_REASON)
+            _status.value = status
+            return@withLock status
+        }
+
         val connected = billing.ensureConnected()
         val cached = settings.snapshot().cachedProEntitlement
 
@@ -99,4 +124,9 @@ class EntitlementRepository(
     fun layerLimit(): Int = if (_status.value.isPro) Int.MAX_VALUE else FREE_LAYER_LIMIT
 
     fun canAddLayer(currentLayerCount: Int): Boolean = currentLayerCount < layerLimit()
+
+    companion object {
+        /** Surfaced in the UI wherever a [ProStatus.EntitledUnverified] reason is shown. */
+        const val DEBUG_OVERRIDE_REASON = "Debug override — not a real purchase"
+    }
 }

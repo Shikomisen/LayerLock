@@ -9,6 +9,13 @@
         android:name="android.software.live_wallpaper"
         android:required="false" />
 
+    <!--
+      Only ever used to *remove* this app's own wallpaper when the user turns the Settings toggle
+      off. Applying one still goes through the system picker, which the user confirms themselves —
+      there is no path here that changes the wallpaper without them asking.
+    -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
     <application>
         <service
             android:name=".LayerLockWallpaperService"

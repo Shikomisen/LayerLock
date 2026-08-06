@@ -57,6 +57,8 @@ class LockScreenActivity : ComponentActivity() {
 
     private val widgetDataSource by lazy { WidgetDataSource(this) }
 
+    private var assets: SceneAssets? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -64,7 +66,9 @@ class LockScreenActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         val sceneRepository = LayerLockGraph.sceneRepository(this)
-        val assets = SceneAssets(applicationContext, lifecycleScope)
+        // Held as a field so onDestroy can free it. This Activity is recreated on every screen-on
+        // (it is noHistory), so leaking a scene's worth of decoded bitmaps per wake adds up fast.
+        val assets = SceneAssets(applicationContext, lifecycleScope).also { this.assets = it }
         val sceneFlow = sceneRepository.activeScene(ScreenTarget.LOCK)
             .stateIn(lifecycleScope, SharingStarted.Eagerly, null)
 
@@ -129,6 +133,8 @@ class LockScreenActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        assets?.release()
+        assets = null
         super.onDestroy()
     }
 

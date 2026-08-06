@@ -25,10 +25,11 @@ import com.shikomisen.layerlock.canvas.SceneCanvasRenderer
 import com.shikomisen.layerlock.canvas.WidgetDataSource
 import com.shikomisen.layerlock.data.LayerLockGraph
 import com.shikomisen.layerlock.scene.Scene
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -46,52 +47,62 @@ class SceneWidget : GlanceAppWidget() {
 
     override val sizeMode: SizeMode = SizeMode.Exact
 
-    override suspend fun provideGlance(context: Context, id: GlanceId) {
+    override suspend fun provideGlance(context: Context, id: GlanceId) = coroutineScope {
         val repository = LayerLockGraph.sceneRepository(context)
         val library = repository.snapshot()
         val scene = library.activeHomeScene ?: library.activeLockScene ?: library.scenes.firstOrNull()
 
         val widgets = WidgetDataSource(context).current()
-        val assets = SceneAssets(context, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+        // Scoped to this session, not to a free-standing CoroutineScope. provideGlance runs once per
+        // widget update and its decoded bitmaps used to outlive it with nothing left to release
+        // them, so every update leaked a scene's worth of images.
+        val assets = SceneAssets(context, this)
 
-        if (scene != null) {
-            assets.prepare(scene)
-            // Give decoding a brief chance so the widget does not render every photo as a
-            // placeholder. Anything slower than this renders on the next update instead.
-            var attempts = 0
-            while (attempts < ASSET_WAIT_ATTEMPTS && !assets.isSettled(scene)) {
-                delay(ASSET_WAIT_INTERVAL_MS)
-                attempts++
-            }
-        }
-
-        provideContent {
-            val size = androidx.glance.LocalSize.current
-            Box(
-                modifier = GlanceModifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (scene == null) {
-                    Text(
-                        text = "Open LayerLock to design a scene",
-                        style = TextStyle(color = ColorProvider(Color.White)),
-                    )
-                } else {
-                    val bitmap = renderScene(
-                        scene = scene,
-                        assets = assets,
-                        widgets = widgets,
-                        widthPx = size.width.value.roundToInt(),
-                        heightPx = size.height.value.roundToInt(),
-                    )
-                    Image(
-                        provider = ImageProvider(bitmap),
-                        contentDescription = scene.name,
-                        contentScale = ContentScale.Crop,
-                        modifier = GlanceModifier.fillMaxSize(),
-                    )
+        try {
+            if (scene != null) {
+                assets.prepare(scene)
+                // Give decoding a brief chance so the widget does not render every photo as a
+                // placeholder. Anything slower than this renders on the next update instead.
+                var attempts = 0
+                while (attempts < ASSET_WAIT_ATTEMPTS && !assets.isSettled(scene)) {
+                    delay(ASSET_WAIT_INTERVAL_MS)
+                    attempts++
                 }
             }
+
+            provideContent {
+                val size = androidx.glance.LocalSize.current
+                Box(
+                    modifier = GlanceModifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (scene == null) {
+                        Text(
+                            text = "Open LayerLock to design a scene",
+                            style = TextStyle(color = ColorProvider(Color.White)),
+                        )
+                    } else {
+                        val bitmap = renderScene(
+                            scene = scene,
+                            assets = assets,
+                            widgets = widgets,
+                            widthPx = size.width.value.roundToInt(),
+                            heightPx = size.height.value.roundToInt(),
+                        )
+                        Image(
+                            provider = ImageProvider(bitmap),
+                            contentDescription = scene.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = GlanceModifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+        } finally {
+            // provideContent suspends for the life of the session, so this runs on cancellation —
+            // hence NonCancellable, and Main because release() stops Animatable drawables that were
+            // started on the main thread.
+            withContext(NonCancellable + Dispatchers.Main) { assets.release() }
         }
     }
 

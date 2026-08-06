@@ -6,6 +6,7 @@ import android.graphics.drawable.Animatable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.media.MediaMetadataRetriever
+import android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC
 import android.net.Uri
 import android.os.Build
 import android.util.SizeF
@@ -87,15 +88,7 @@ class SceneAssets(
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
     private val failed = ConcurrentHashMap.newKeySet<String>()
 
-    private val imageLoader: ImageLoader = ImageLoader.Builder(appContext)
-        .components {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                add(ImageDecoderDecoder.Factory())
-            } else {
-                add(GifDecoder.Factory())
-            }
-        }
-        .build()
+    private val imageLoader: ImageLoader = sharedImageLoader(appContext)
 
     override fun bitmap(uri: String): Bitmap? = bitmaps[uri]?.takeUnless { it.isRecycled }
 
@@ -143,7 +136,7 @@ class SceneAssets(
         scope.launch {
             val loaded = runCatching {
                 when (kind) {
-                    MediaKind.VIDEO -> loadVideoPoster(uri)
+                    MediaKind.VIDEO -> loadVideoPoster(uri, maxWidth, maxHeight)
                     MediaKind.GIF -> loadAnimated(uri, maxWidth, maxHeight)
                     MediaKind.IMAGE -> loadStill(uri, maxWidth, maxHeight)
                 }
@@ -195,11 +188,22 @@ class SceneAssets(
      * and lock screen, a GL quad in the wallpaper engine). The poster frame decoded here is what the
      * shared canvas renderer falls back to — which is also exactly what a PNG export needs.
      */
-    private suspend fun loadVideoPoster(uri: String): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun loadVideoPoster(
+        uri: String,
+        maxWidth: Int,
+        maxHeight: Int,
+    ): Boolean = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(appContext, Uri.parse(uri))
-            val frame = retriever.getFrameAtTime(0) ?: return@withContext false
+            // getFrameAtTime decodes at the video's native resolution — a 4K source costs ~33MB for
+            // a frame that gets drawn into a 1080-wide canvas. Everything else here is downsampled
+            // on decode (see the class doc); posters were the one path that was not.
+            val frame = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                retriever.getScaledFrameAtTime(0, OPTION_CLOSEST_SYNC, maxWidth, maxHeight)
+            } else {
+                retriever.getFrameAtTime(0)
+            } ?: return@withContext false
             bitmaps[uri] = frame
             sizes[uri] = SizeF(frame.width.toFloat(), frame.height.toFloat())
             true
@@ -229,4 +233,34 @@ class SceneAssets(
     }
 
     private enum class MediaKind { IMAGE, GIF, VIDEO }
+
+    companion object {
+
+        /**
+         * One [ImageLoader] for the whole process.
+         *
+         * This must never become per-instance again. A Coil `ImageLoader` sizes its bitmap memory
+         * cache at a *percentage of the heap* (~25%), so every extra instance claims another quarter
+         * of the budget for itself. [SceneAssets] is constructed per editor ViewModel, per library
+         * ViewModel, per lock-screen Activity, per wallpaper engine and once per widget update — four
+         * live instances was enough to exhaust a 256MB heap on its own, which is what turned every
+         * unrelated allocation in the app into an OutOfMemoryError.
+         */
+        @Volatile
+        private var shared: ImageLoader? = null
+
+        private fun sharedImageLoader(appContext: Context): ImageLoader =
+            shared ?: synchronized(this) {
+                shared ?: ImageLoader.Builder(appContext)
+                    .components {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            add(ImageDecoderDecoder.Factory())
+                        } else {
+                            add(GifDecoder.Factory())
+                        }
+                    }
+                    .build()
+                    .also { shared = it }
+            }
+    }
 }
