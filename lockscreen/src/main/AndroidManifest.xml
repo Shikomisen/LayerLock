@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      Deliberately absent, and worth stating explicitly: no BIND_DEVICE_ADMIN, no
+      SYSTEM_ALERT_WINDOW, and no DISABLE_KEYGUARD. That combination is the one Play scrutinises for
+      credential-phishing overlays (§3). This app draws in front of the keyguard with the public
+      setShowWhenLocked API instead, and never touches authentication.
+    -->
+
+    <application>
+        <activity
+            android:name=".LockScreenActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:showOnLockScreen="true"
+            android:taskAffinity="com.shikomisen.layerlock.lockscreen"
+            android:theme="@style/Theme.LayerLock.LockScreen" />
+
+        <service
+            android:name=".LockScreenService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Showing a user-configured lock screen when the device wakes" />
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:directBootAware="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".LayerLockNotificationListener"
+            android:exported="true"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+
+</manifest>

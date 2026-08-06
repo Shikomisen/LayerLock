@@ -1,0 +1,4 @@
+<resources>
+    <string name="widget_label">LayerLock scene</string>
+    <string name="widget_description">Your active scene, as a home-screen widget.</string>
+</resources>

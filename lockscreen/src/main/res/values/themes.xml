@@ -1,0 +1,12 @@
+<resources>
+    <string name="notification_listener_label">LayerLock notifications</string>
+
+    <!-- Fullscreen and translucent: the scene supplies every pixel, including behind the bars. -->
+    <style name="Theme.LayerLock.LockScreen" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

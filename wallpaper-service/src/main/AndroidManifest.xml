@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Declared as a live wallpaper. BIND_WALLPAPER means only the system can bind to this service,
+      which is what makes exporting it safe.
+    -->
+    <uses-feature
+        android:name="android.software.live_wallpaper"
+        android:required="false" />
+
+    <application>
+        <service
+            android:name=".LayerLockWallpaperService"
+            android:exported="true"
+            android:label="@string/wallpaper_label"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/layerlock_wallpaper" />
+        </service>
+    </application>
+
+</manifest>

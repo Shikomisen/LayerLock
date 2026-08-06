@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Required by SceneExporter.applyAsStaticWallpaper. A normal, install-time permission — there is
+      no runtime prompt, and it grants nothing beyond setting the wallpaper.
+    -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
+</manifest>

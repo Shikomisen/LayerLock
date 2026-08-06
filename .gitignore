@@ -1,0 +1,47 @@
+# Gradle
+.gradle/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration (machine-specific SDK paths, etc.)
+local.properties
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+captures/
+.navigation/
+
+# Kotlin
+.kotlin/
+
+# NDK / native
+.externalNativeBuild/
+.cxx/
+
+# Build artifacts
+*.apk
+*.aab
+*.ap_
+*.aar
+*.dex
+*.class
+output.json
+release/
+
+# Signing material — never commit these
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+google-services.json
+
+# Logs & crash dumps
+*.log
+hs_err_pid*
+replay_pid*
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown in the system widget picker. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="180dp"
+    android:height="110dp"
+    android:viewportWidth="180"
+    android:viewportHeight="110">
+    <path
+        android:fillColor="#2B1B3D"
+        android:pathData="M0,0h180v110h-180z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20,34h96v26h-96z" />
+    <path
+        android:fillColor="#E0654A"
+        android:pathData="M20,70h60v10h-60z" />
+</vector>
