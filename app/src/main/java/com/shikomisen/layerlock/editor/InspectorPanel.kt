@@ -67,6 +67,7 @@ fun InspectorPanel(
     onNudge: (Float, Float) -> Unit,
     onScale: (Float) -> Unit,
     onRotate: (Float) -> Unit,
+    onResetStretch: () -> Unit,
     onGestureStart: () -> Unit,
     onStyle: ((TextStyleSpec) -> TextStyleSpec) -> Unit,
     onText: (String) -> Unit,
@@ -112,6 +113,26 @@ fun InspectorPanel(
             onStart = onGestureStart,
             onValueChange = onScale,
         )
+
+        // Only worth showing once an edge handle has actually distorted the layer — otherwise it is
+        // a control for undoing something the user has not done.
+        if (layer.transform.stretchX != 1f || layer.transform.stretchY != 1f) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Stretched ${(layer.transform.stretchX * 100).roundToInt()}% × " +
+                        "${(layer.transform.stretchY * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                AssistChip(
+                    onClick = onResetStretch,
+                    label = { Text("Reset shape") },
+                )
+            }
+        }
 
         LabelledSlider(
             label = "Rotation",

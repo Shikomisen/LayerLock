@@ -98,6 +98,75 @@ object SceneOps {
     const val MIN_SCALE = 0.05f
     const val MAX_SCALE = 20f
 
+    /**
+     * Bounds on the non-uniform component alone.
+     *
+     * Tighter than the scale range because this is an aspect-ratio distortion, not a size: past
+     * roughly 10:1 in either direction a layer stops being recognisable as the thing it was, and
+     * the uniform [MAX_SCALE] is still there for making something genuinely huge.
+     */
+    const val MIN_STRETCH = 0.1f
+    const val MAX_STRETCH = 10f
+
+    /** Zoom bounds for a background. Never below 1, so its fit can never leave a gap. */
+    const val MIN_BACKGROUND_ZOOM = 1f
+    const val MAX_BACKGROUND_ZOOM = 4f
+
+    /**
+     * Pans and zooms the background within the overflow it actually has.
+     *
+     * [limitX] and [limitY] are the largest usable offsets, as a fraction of the canvas, and the
+     * caller supplies them because working them out needs the source's intrinsic size — which this
+     * module deliberately cannot measure. Clamping to them is what stops the background being
+     * dragged off its own edge and leaving a gap.
+     *
+     * Note that a `COVER` background usually has overflow at zoom 1 already: filling a canvas of a
+     * different shape crops one axis, and that crop is exactly what there is to pan through.
+     */
+    fun panBackground(
+        scene: Scene,
+        dx: Float,
+        dy: Float,
+        zoomBy: Float = 1f,
+        limitX: Float = 0f,
+        limitY: Float = 0f,
+    ): Scene {
+        val background = scene.background
+        val zoom = (background.zoom * zoomBy)
+            .coerceIn(MIN_BACKGROUND_ZOOM, MAX_BACKGROUND_ZOOM)
+        return scene.copy(
+            background = background.copy(
+                zoom = zoom,
+                offsetX = (background.offsetX + dx).coerceIn(-limitX, limitX),
+                offsetY = (background.offsetY + dy).coerceIn(-limitY, limitY),
+            ),
+        )
+    }
+
+    /**
+     * Resizes a layer by moving one handle, leaving the opposite edge or corner where it is.
+     *
+     * The caller works out the new half-extents (it needs [LayerGeometry] to know how big the layer
+     * is unscaled, which this module deliberately cannot see); this applies them and clamps.
+     */
+    fun resizeLayer(
+        scene: Scene,
+        layerId: String,
+        x: Float,
+        y: Float,
+        stretchX: Float,
+        stretchY: Float,
+    ): Scene {
+        val layer = findLayer(scene, layerId) ?: return scene
+        val transform = layer.transform.copy(
+            x = x.coerceIn(-OFF_CANVAS_SLACK, scene.canvas.width + OFF_CANVAS_SLACK),
+            y = y.coerceIn(-OFF_CANVAS_SLACK, scene.canvas.height + OFF_CANVAS_SLACK),
+            stretchX = stretchX.coerceIn(MIN_STRETCH, MAX_STRETCH),
+            stretchY = stretchY.coerceIn(MIN_STRETCH, MAX_STRETCH),
+        )
+        return replaceLayer(scene, layer.withTransform(transform))
+    }
+
     /** How far past the canvas edge a layer's centre may sit before it stops being draggable. */
     private const val OFF_CANVAS_SLACK = 200f
 }

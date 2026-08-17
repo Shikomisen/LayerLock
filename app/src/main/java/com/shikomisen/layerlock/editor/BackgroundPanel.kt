@@ -11,6 +11,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.shikomisen.layerlock.scene.Background
@@ -34,6 +35,7 @@ fun BackgroundPanel(
     onPickVideo: () -> Unit,
     onBackground: ((Background) -> Background) -> Unit,
     onDim: (Float) -> Unit,
+    onResetFraming: () -> Unit,
     onGestureStart: () -> Unit,
     onTarget: (ScreenTarget) -> Unit,
     onGridSize: (Int) -> Unit,
@@ -124,6 +126,33 @@ fun BackgroundPanel(
                     selected = background.scaleMode,
                     onSelect = { mode -> onBackground { it.copy(scaleMode = mode) } },
                 )
+
+                Text(
+                    "Drag the canvas to move the background, pinch to zoom into it. " +
+                        "Filling a screen of a different shape always crops something — this is " +
+                        "how you choose what gets kept.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val framed = background.offsetX != 0f ||
+                    background.offsetY != 0f ||
+                    background.zoom != 1f
+                if (framed) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "Zoom ${(background.zoom * 100).roundToInt()}% · " +
+                                "offset ${(background.offsetX * 100).roundToInt()}%, " +
+                                "${(background.offsetY * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        AssistChip(onClick = onResetFraming, label = { Text("Recentre") })
+                    }
+                }
             }
         }
 

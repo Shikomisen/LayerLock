@@ -156,7 +156,17 @@ private fun BoxScope.VideoBandSurface(
     }
 
     val placement = if (band.isBackground) {
-        Modifier.fillMaxSize()
+        // `RESIZE_MODE_ZOOM` below already covers; this shifts which part of that cover is on
+        // screen, matching what the canvas renderer does to a still background.
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val zoom = scene.background.zoom.coerceAtLeast(1f)
+                scaleX = zoom
+                scaleY = zoom
+                translationX = scene.background.offsetX * size.width
+                translationY = scene.background.offsetY * size.height
+            }
     } else {
         val layer = band.layer!!
         val size = LayerGeometry.scaledSize(layer, scene, assets, widgets, timeMillis)

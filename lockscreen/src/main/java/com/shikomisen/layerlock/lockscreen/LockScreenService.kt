@@ -81,6 +81,13 @@ class LockScreenService : Service() {
      * scene appears on some wakes and not others. Re-checking for a short window converts that race
      * into a wait. If the keyguard never appears (the device was unlocked, or the user unlocked
      * within the window) nothing is shown, which is the correct outcome.
+     *
+     * Pocket wakes (OPEN-1) are deliberately *not* handled here. Deferring the start on a proximity
+     * reading would mean waiting on a second asynchronous signal inside a loop that already races
+     * the keyguard, and would have to answer what happens when the phone leaves the pocket after
+     * the window closes — the scene would simply never appear. [LockScreenActivity] checks the
+     * sensor itself instead, which handles both being pocketed at wake and being pocketed later,
+     * and leaves this loop with one thing to wait for.
      */
     private fun showLockScene(attempt: Int = 0) {
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager

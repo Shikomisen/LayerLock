@@ -279,6 +279,11 @@ class LayerLockWallpaperService : WallpaperService() {
 
         private fun drawWithGl(current: Scene) {
             val glRenderer = gl ?: return
+            glRenderer.setBackgroundFraming(
+                current.background.offsetX,
+                current.background.offsetY,
+                current.background.zoom,
+            )
             val key = overlayContentKey(current)
             if (key != overlayKey) {
                 glRenderer.setOverlay(renderOverlay(current))

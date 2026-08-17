@@ -102,6 +102,21 @@ data class Background(
     val scaleMode: ScaleMode = ScaleMode.COVER,
     /** 0..1 dim applied over the background — the cheapest way to make overlaid text legible. */
     val dim: Float = 0f,
+    /**
+     * Which part of an oversized background is shown, as a fraction of the canvas.
+     *
+     * `COVER` has to crop something whenever the source and the canvas disagree on aspect ratio,
+     * and cropping to the centre is only the right answer by luck. These shift that crop: `0.1`
+     * moves the image right by a tenth of the canvas width.
+     *
+     * A fraction of the canvas rather than of the overflow, so the number means the same thing in
+     * all three places a background gets drawn — the shared canvas renderer, the ExoPlayer surface
+     * in the editor and lock screen, and the GL quad in the wallpaper engine.
+     */
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
+    /** Zoom on top of [scaleMode]. 1 is the plain fit; larger crops in further. */
+    val zoom: Float = 1f,
 )
 
 @Serializable
@@ -110,7 +125,21 @@ data class Transform(
     val y: Float,
     val scale: Float = 1f,
     val rotation: Float = 0f,
-)
+    /**
+     * Non-uniform stretch applied on top of [scale].
+     *
+     * Kept separate from [scale] rather than replacing it with a scaleX/scaleY pair for two
+     * reasons: scenes already on disk deserialize unchanged because both default to 1, and "scale"
+     * stays a single meaningful number for the inspector slider and for pinch-to-zoom. Dragging an
+     * edge handle changes only the stretch, so a layer's uniform scale still means what it did.
+     */
+    val stretchX: Float = 1f,
+    val stretchY: Float = 1f,
+) {
+    /** Total horizontal and vertical scale factors, which is what anything drawing wants. */
+    val effectiveScaleX: Float get() = scale * stretchX
+    val effectiveScaleY: Float get() = scale * stretchY
+}
 
 @Serializable
 enum class TextAlign {

@@ -45,6 +45,10 @@ internal class GlWallpaperRenderer(
 
     private var overlayUploaded = false
 
+    private var offsetX = 0f
+    private var offsetY = 0f
+    private var zoom = 1f
+
     private val stMatrix = FloatArray(16)
 
     /**
@@ -139,6 +143,28 @@ internal class GlWallpaperRenderer(
         this.height = height
     }
 
+    /**
+     * Binds this renderer's context to the calling thread.
+     *
+     * Every entry point that touches GL has to do this first, and the reason is easy to miss: a
+     * `WallpaperService` can have several [SceneWallpaperEngine]s alive in one process — the live
+     * preview in the wallpaper picker alongside the real wallpaper, and home alongside lock — and
+     * they all run on the *same* main-thread Looper. Each builds its own renderer with its own
+     * `EGLContext`, so whichever one initialised last has left *its* context current on that thread.
+     *
+     * An `EGLContext` is current per-thread, not per-object. Making it current once in [setUpEgl]
+     * was therefore only correct while exactly one renderer existed: as soon as a second engine
+     * appeared, the first engine's every subsequent GL call ran against a foreign context.
+     * `SurfaceTexture.updateTexImage` is the one that fails loudly about it —
+     * `IllegalStateException: Unable to update texture contents`, because the texture name it wants
+     * to bind belongs to a context that is no longer current — which froze the wallpaper on its
+     * first frame while the picker preview, being alone at the time, looked perfectly fine.
+     */
+    private fun makeCurrent(): Boolean =
+        display != EGL14.EGL_NO_DISPLAY &&
+            eglSurface != EGL14.EGL_NO_SURFACE &&
+            EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
+
     /** Uploads a newly rendered overlay. Call only when the canvas content actually changed. */
     fun setOverlay(bitmap: Bitmap?) {
         if (!isReady) return
@@ -146,6 +172,7 @@ internal class GlWallpaperRenderer(
             overlayUploaded = false
             return
         }
+        if (!makeCurrent()) return
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId)
         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
         overlayUploaded = true
@@ -158,6 +185,7 @@ internal class GlWallpaperRenderer(
      */
     fun drawFrame(videoWidth: Int, videoHeight: Int): Boolean {
         if (!isReady) return false
+        if (!makeCurrent()) return false
 
         return runCatching {
             surfaceTexture?.let { texture ->
@@ -208,17 +236,32 @@ internal class GlWallpaperRenderer(
             cropY = (1f - videoAspect / surfaceAspect) / 2f
         }
 
-        val left = cropX
-        val right = 1f - cropX
+        // The scene's background pan/zoom, expressed as the window of texture that fills the quad.
+        // Moving the image right by `offset` of a screen width means sampling from further left, so
+        // the centre moves against the offset — hence the subtraction.
+        val spanU = (1f - 2f * cropX) / zoom
+        val spanV = (1f - 2f * cropY) / zoom
+        val centreU = (0.5f - offsetX * spanU).coerceIn(spanU / 2f, 1f - spanU / 2f)
+        val centreV = (0.5f - offsetY * spanV).coerceIn(spanV / 2f, 1f - spanV / 2f)
+
+        val left = centreU - spanU / 2f
+        val right = centreU + spanU / 2f
         // v ascends with the quad here (GL convention) — see [videoTexCoords].
-        val vMin = cropY
-        val vMax = 1f - cropY
+        val vMin = centreV - spanV / 2f
+        val vMax = centreV + spanV / 2f
 
         videoTexCoords.clear()
         videoTexCoords.put(
             floatArrayOf(left, vMin, right, vMin, left, vMax, right, vMax),
         )
         videoTexCoords.position(0)
+    }
+
+    /** The scene's background framing. Set whenever the scene changes; see [updateVideoTexCoords]. */
+    fun setBackgroundFraming(offsetX: Float, offsetY: Float, zoom: Float) {
+        this.offsetX = offsetX
+        this.offsetY = offsetY
+        this.zoom = zoom.coerceAtLeast(1f)
     }
 
     private fun drawVideoQuad() {

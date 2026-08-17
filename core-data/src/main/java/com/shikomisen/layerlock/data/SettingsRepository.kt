@@ -21,6 +21,8 @@ class SettingsRepository(private val store: DataStore<AppSettings>) {
 
     suspend fun setSnapToGrid(enabled: Boolean) = update { it.copy(snapToGrid = enabled) }
 
+    suspend fun setSnapToObjects(enabled: Boolean) = update { it.copy(snapToObjects = enabled) }
+
     suspend fun setStaticMode(enabled: Boolean) = update { it.copy(staticMode = enabled) }
 
     suspend fun setMaxFps(fps: Int) = update { it.copy(maxFps = fps.coerceIn(1, 60)) }

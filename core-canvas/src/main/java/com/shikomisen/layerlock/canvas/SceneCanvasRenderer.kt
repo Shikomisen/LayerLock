@@ -24,6 +24,7 @@ import com.shikomisen.layerlock.scene.Scene
 import com.shikomisen.layerlock.scene.TextLayer
 import com.shikomisen.layerlock.scene.VideoLayer
 import com.shikomisen.layerlock.scene.WidgetLayer
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -67,7 +68,17 @@ class SceneCanvasRenderer {
         val showGrid: Boolean = false,
         val showBounds: Boolean = true,
         val gridSize: Int = 48,
+        /** Alignment guides for the edge the dragged layer just snapped to. Transient. */
+        val guides: List<Guide> = emptyList(),
     )
+
+    /**
+     * A single alignment guide, in scene coordinates.
+     *
+     * Drawn only while a snap is actually in effect. A snap the user cannot see reads as the drag
+     * being laggy or imprecise rather than as a feature, which is the whole reason this exists.
+     */
+    data class Guide(val vertical: Boolean, val position: Float)
 
     /**
      * Draws [scene] into [canvas], scaled to fill a [viewWidth] x [viewHeight] surface.
@@ -110,6 +121,7 @@ class SceneCanvasRenderer {
         }
 
         frame.editor?.let { drawEditorChrome(canvas, scene, it, frame) }
+        frame.editor?.takeIf { it.guides.isNotEmpty() }?.let { drawGuides(canvas, scene, it) }
         if (frame.watermark) drawWatermark(canvas, scene)
 
         canvas.restoreToCount(save)
@@ -152,7 +164,14 @@ class SceneCanvasRenderer {
                 if (bitmap == null) {
                     drawGradient(canvas, background, scratchRect)
                 } else {
-                    drawBitmapFitted(canvas, bitmap, scratchRect, background.scaleMode, 1f)
+                    drawBitmapFitted(
+                        canvas = canvas,
+                        bitmap = bitmap,
+                        target = scratchRect,
+                        scaleMode = background.scaleMode,
+                        opacity = 1f,
+                        background = background,
+                    )
                 }
             }
         }
@@ -192,7 +211,7 @@ class SceneCanvasRenderer {
         val save = canvas.save()
         canvas.translate(layer.transform.x, layer.transform.y)
         canvas.rotate(layer.transform.rotation)
-        canvas.scale(layer.transform.scale, layer.transform.scale)
+        canvas.scale(layer.transform.effectiveScaleX, layer.transform.effectiveScaleY)
 
         when (layer) {
             is ClockLayer -> TextPainter.draw(
@@ -345,6 +364,23 @@ class SceneCanvasRenderer {
         }
     }
 
+    /** Full-bleed lines through whatever the dragged layer is currently aligned to. */
+    private fun drawGuides(canvas: Canvas, scene: Scene, overlay: EditorOverlay) {
+        strokePaint.reset()
+        strokePaint.style = Paint.Style.STROKE
+        strokePaint.isAntiAlias = true
+        strokePaint.strokeWidth = 3f
+        strokePaint.color = GUIDE_COLOR
+
+        overlay.guides.forEach { guide ->
+            if (guide.vertical) {
+                canvas.drawLine(guide.position, 0f, guide.position, scene.canvas.height.toFloat(), strokePaint)
+            } else {
+                canvas.drawLine(0f, guide.position, scene.canvas.width.toFloat(), guide.position, strokePaint)
+            }
+        }
+    }
+
     private fun drawEditorChrome(
         canvas: Canvas,
         scene: Scene,
@@ -374,15 +410,32 @@ class SceneCanvasRenderer {
         strokePaint.color = SELECTION_COLOR
         canvas.drawRect(scratchRect, strokePaint)
 
+        // Rotation handle, on a stalk out from the top edge. Drawn before the resize handles so the
+        // top-centre handle sits on top of where the stalk meets it.
+        val stalkTop = -size.height / 2f - LayerGeometry.ROTATION_HANDLE_OFFSET
+        canvas.drawLine(0f, -size.height / 2f, 0f, stalkTop, strokePaint)
+
         fillPaint.reset()
         fillPaint.isAntiAlias = true
         fillPaint.color = SELECTION_COLOR
-        listOf(
-            scratchRect.left to scratchRect.top,
-            scratchRect.right to scratchRect.top,
-            scratchRect.left to scratchRect.bottom,
-            scratchRect.right to scratchRect.bottom,
-        ).forEach { (hx, hy) -> canvas.drawCircle(hx, hy, HANDLE_RADIUS, fillPaint) }
+        canvas.drawCircle(0f, stalkTop, ROTATION_HANDLE_RADIUS, fillPaint)
+        // Corners move a corner, edges move one side. Drawn as different shapes so which is which
+        // is readable before the user has dragged anything.
+        LayerGeometry.Handle.entries.forEach { handle ->
+            val handleX = size.width / 2f * handle.dirX
+            val handleY = size.height / 2f * handle.dirY
+            if (handle.isCorner) {
+                canvas.drawCircle(handleX, handleY, HANDLE_RADIUS, fillPaint)
+            } else {
+                scratchRect.set(
+                    handleX - EDGE_HANDLE_HALF_LENGTH * abs(handle.dirY) - EDGE_HANDLE_HALF_THICKNESS * abs(handle.dirX),
+                    handleY - EDGE_HANDLE_HALF_LENGTH * abs(handle.dirX) - EDGE_HANDLE_HALF_THICKNESS * abs(handle.dirY),
+                    handleX + EDGE_HANDLE_HALF_LENGTH * abs(handle.dirY) + EDGE_HANDLE_HALF_THICKNESS * abs(handle.dirX),
+                    handleY + EDGE_HANDLE_HALF_LENGTH * abs(handle.dirX) + EDGE_HANDLE_HALF_THICKNESS * abs(handle.dirY),
+                )
+                canvas.drawRoundRect(scratchRect, HANDLE_RADIUS, HANDLE_RADIUS, fillPaint)
+            }
+        }
 
         canvas.restoreToCount(save)
     }
@@ -411,9 +464,10 @@ class SceneCanvasRenderer {
         target: RectF,
         scaleMode: ScaleMode,
         opacity: Float,
+        background: Background? = null,
     ) {
         bitmapPaint.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
-        val destination = when (scaleMode) {
+        val fitted = when (scaleMode) {
             ScaleMode.STRETCH -> target
             ScaleMode.COVER -> LayerGeometry.fit(
                 bitmap.width.toFloat(),
@@ -430,6 +484,24 @@ class SceneCanvasRenderer {
             )
         }
 
+        // The pan/zoom is applied to the already-fitted rect rather than folded into the fit, so
+        // "cover" still decides the base framing and this only adjusts it.
+        val destination = if (background == null) {
+            fitted
+        } else {
+            val zoom = background.zoom.coerceAtLeast(1f)
+            val width = fitted.width() * zoom
+            val height = fitted.height() * zoom
+            val centerX = fitted.centerX() + background.offsetX * target.width()
+            val centerY = fitted.centerY() + background.offsetY * target.height()
+            RectF(
+                centerX - width / 2f,
+                centerY - height / 2f,
+                centerX + width / 2f,
+                centerY + height / 2f,
+            )
+        }
+
         val save = canvas.save()
         canvas.clipRect(target)
         canvas.drawBitmap(bitmap, null, destination, bitmapPaint)
@@ -439,7 +511,17 @@ class SceneCanvasRenderer {
 
     private companion object {
         val SELECTION_COLOR = Color.argb(255, 120, 190, 255)
+
+        /** Warm, so a guide reads as a different kind of thing from the selection box. */
+        val GUIDE_COLOR = Color.argb(230, 255, 145, 90)
         const val HANDLE_RADIUS = 14f
+
+        /** Edge handles are drawn as short bars along their edge, to read as one-axis controls. */
+        const val EDGE_HANDLE_HALF_LENGTH = 26f
+        const val EDGE_HANDLE_HALF_THICKNESS = 9f
+
+        /** Slightly larger than a resize handle, since it is the only one that is not on the box. */
+        const val ROTATION_HANDLE_RADIUS = 17f
         const val WATERMARK_MARGIN = 90f
         val DASHED: PathEffect = DashPathEffect(floatArrayOf(18f, 14f), 0f)
     }

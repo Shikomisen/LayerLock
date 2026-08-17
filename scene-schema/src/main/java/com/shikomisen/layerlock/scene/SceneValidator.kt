@@ -41,6 +41,9 @@ object SceneValidator {
             if (layer.id.isBlank()) add(Issue(prefix, "Layer id must not be blank"))
             if (layer.opacity !in 0f..1f) add(Issue("$prefix.opacity", "Opacity must be between 0 and 1"))
             if (layer.transform.scale <= 0f) add(Issue("$prefix.transform.scale", "Scale must be positive"))
+            if (layer.transform.stretchX <= 0f || layer.transform.stretchY <= 0f) {
+                add(Issue("$prefix.transform.stretch", "Stretch must be positive"))
+            }
             if (layer.sourceUriOrNull?.isBlank() == true) {
                 add(Issue("$prefix.sourceUri", "${layer.displayName} layer needs a media source"))
             }
@@ -70,9 +73,23 @@ object SceneValidator {
                 .withTransform(
                     repaired.transform.copy(
                         scale = repaired.transform.scale.coerceIn(SceneOps.MIN_SCALE, SceneOps.MAX_SCALE),
+                        stretchX = repaired.transform.stretchX
+                            .coerceIn(SceneOps.MIN_STRETCH, SceneOps.MAX_STRETCH),
+                        stretchY = repaired.transform.stretchY
+                            .coerceIn(SceneOps.MIN_STRETCH, SceneOps.MAX_STRETCH),
                     ),
                 )
         }
+        // Only the zoom and a sanity bound on the offsets. The real pan limit depends on the
+        // source's intrinsic size, which this module cannot measure — the editor clamps properly,
+        // and anything past a whole canvas of offset is corrupt rather than merely out of range.
+        val background = scene.background.copy(
+            zoom = scene.background.zoom
+                .coerceIn(SceneOps.MIN_BACKGROUND_ZOOM, SceneOps.MAX_BACKGROUND_ZOOM),
+            offsetX = scene.background.offsetX.coerceIn(-1f, 1f),
+            offsetY = scene.background.offsetY.coerceIn(-1f, 1f),
+        )
+
         return scene.copy(
             name = scene.name.ifBlank { "Untitled scene" },
             canvas = CanvasSize(
@@ -80,7 +97,7 @@ object SceneValidator {
                 height = scene.canvas.height.coerceAtLeast(1),
             ),
             gridSize = scene.gridSize.coerceAtLeast(1),
-            background = scene.background.copy(dim = scene.background.dim.coerceIn(0f, 1f)),
+            background = background.copy(dim = background.dim.coerceIn(0f, 1f)),
             layers = layers,
         )
     }

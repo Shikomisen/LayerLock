@@ -52,6 +52,17 @@ import kotlinx.coroutines.flow.stateIn
  * no code path here that could — which is exactly why the older Device Admin "disable keyguard" plus
  * `SYSTEM_ALERT_WINDOW` overlay approach is avoided entirely (§3, §10). That combination is what
  * credential-phishing malware uses, and Play reviews it accordingly.
+ *
+ * ## Pocket suppression (OPEN-1)
+ *
+ * Because [requestUnlock] hands off to the system credential prompt, a swipe fired by accident is
+ * not a harmless misread: subsequent blind contact lands on the OS keypad as wrong attempts and
+ * trips a real lockout. The unlock gesture is therefore gated on [rememberScreenCovered] and needs
+ * a deliberate amount of travel ([UNLOCK_DRAG_THRESHOLD]) before it fires at all.
+ *
+ * That gate is about *what the user is taken to be asking for*, and changes nothing above: the
+ * handoff, `setShowWhenLocked`, and `requestDismissKeyguard`'s semantics are all untouched, and a
+ * device with no proximity sensor behaves exactly as it did before.
  */
 class LockScreenActivity : ComponentActivity() {
 
@@ -77,16 +88,15 @@ class LockScreenActivity : ComponentActivity() {
             val widgets = remember { widgetDataSource.current() }
             val resolved = scene ?: remember { ScenePresets.blank("lock-placeholder", "LayerLock") }
 
+            // Pocket guard (OPEN-1). While the proximity sensor reads "near" the unlock gesture
+            // detector is detached outright rather than kept around and filtered, so fabric contact
+            // has nothing to accumulate against and cannot reach requestUnlock().
+            val covered by rememberScreenCovered()
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures { _, dragAmount ->
-                            // An upward swipe is the conventional "unlock" gesture. It only ever
-                            // asks the OS to take over.
-                            if (dragAmount < UNLOCK_DRAG_THRESHOLD) requestUnlock()
-                        }
-                    },
+                    .then(if (covered) Modifier else Modifier.unlockSwipe(::requestUnlock)),
             ) {
                 SceneSurface(
                     scene = resolved,
@@ -96,7 +106,11 @@ class LockScreenActivity : ComponentActivity() {
                         notificationCount = NotificationMirror.count,
                         nowPlaying = NotificationMirror.nowPlaying,
                     ),
-                    playVideo = true,
+                    // Nothing is visible against a pocket lining, so a covered wake falls back to
+                    // the poster frame instead of holding a live decoder. Passing the state rather
+                    // than only sampling it at create also covers the phone going into a pocket
+                    // while the scene is already up.
+                    playVideo = !covered,
                 )
 
                 UnlockHint(modifier = Modifier.align(Alignment.BottomCenter))
@@ -140,12 +154,55 @@ class LockScreenActivity : ComponentActivity() {
 
     companion object {
 
-        private const val UNLOCK_DRAG_THRESHOLD = -18f
-
         fun intent(context: Context): Intent =
             Intent(context, LockScreenActivity::class.java).addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION,
             )
+    }
+}
+
+/**
+ * How far up a single gesture has to travel, in pixels, before it counts as a deliberate unlock
+ * swipe.
+ *
+ * This is measured *cumulatively over one gesture*, which is the part that matters. The previous
+ * `-18f` was compared against a single drag event's delta, so it was really a velocity test in
+ * disguise: it fired on any one frame that happened to move 18px, which a brush against fabric
+ * easily does, while a slow but perfectly deliberate swipe on a 120Hz panel might never produce
+ * that much in a single frame. Accumulating the gesture makes the number mean what it reads as —
+ * total travel — so a firm value rejects incidental contact without making a real swipe harder.
+ *
+ * 100px is roughly 8mm on a typical modern panel: a clear, intentional flick, still short enough to
+ * trigger well before the thumb runs out of screen. Expressing it in dp would be more consistent
+ * across densities and is worth doing if device testing shows it feeling different across the §11
+ * matrix.
+ */
+private const val UNLOCK_DRAG_THRESHOLD = -100f
+
+/**
+ * The upward-swipe gesture that asks the OS to take over.
+ *
+ * Applied conditionally, so that while the proximity sensor reads "near" this is simply absent from
+ * the modifier chain — detaching it also cancels any gesture already in flight, which is what makes
+ * a phone going into a pocket mid-swipe safe rather than merely unlikely to fire.
+ */
+private fun Modifier.unlockSwipe(onUnlock: () -> Unit): Modifier = pointerInput(Unit) {
+    var travelled = 0f
+    var requested = false
+
+    detectVerticalDragGestures(
+        onDragStart = {
+            travelled = 0f
+            requested = false
+        },
+    ) { _, dragAmount ->
+        travelled += dragAmount
+        // One request per gesture: every further event past the threshold would otherwise fire
+        // another requestDismissKeyguard at the system prompt that the first one just raised.
+        if (!requested && travelled < UNLOCK_DRAG_THRESHOLD) {
+            requested = true
+            onUnlock()
+        }
     }
 }
 

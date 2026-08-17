@@ -13,6 +13,14 @@ import kotlinx.serialization.Serializable
 data class AppSettings(
     val onboardingComplete: Boolean = false,
     val snapToGrid: Boolean = false,
+    /**
+     * Snap a dragged layer's edges and centres to those of the other layers, and snap rotation to
+     * right angles.
+     *
+     * Independent of [snapToGrid] on purpose: the grid is an absolute lattice, this aligns against
+     * whatever else is already in the scene. Wanting one is no reason to be forced into the other.
+     */
+    val snapToObjects: Boolean = true,
     val staticMode: Boolean = false,
     /** Frame cap for the live wallpaper. Lower is kinder to the battery. */
     val maxFps: Int = 30,
